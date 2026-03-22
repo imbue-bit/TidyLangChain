@@ -41,26 +41,51 @@ jobs:
           cp LICENSE README.md tidy-package/ 2>/dev/null || true
 
       - name: Create versioned archive
+        id: prep
         run: |
-          VERSION=${{ github.ref_name }}          # e.g. v1.0.0
-          tar -czf tidylangchain-${VERSION}.tar.gz -C tidy-package .
-          sha256sum tidylangchain-${VERSION}.tar.gz > tidylangchain-${VERSION}.tar.gz.sha256
-          ls -lh *.tar.gz *.sha256
+          VERSION=${{ github.ref_name }}
+          FILENAME="tidylangchain-${VERSION}.tar.gz"
+          tar -czf "$FILENAME" -C tidy-package .
+          sha256sum "$FILENAME" > "${FILENAME}.sha256"
+          
+          # 将文件名存入 step output 方便后续引用
+          echo "pkg_file=$FILENAME" >> $GITHUB_OUTPUT
+          echo "sha_file=${FILENAME}.sha256" >> $GITHUB_OUTPUT
+          
+          # 准备小写的仓库所有者名称（GHCR 强制要求小写）
+          echo "owner_lc=${OWNER,,}" >> $GITHUB_OUTPUT
+        env:
+          OWNER: ${{ github.repository_owner }}
 
+      # 1. 发布到 GitHub Release Assets
       - name: Upload archive to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           files: |
-            tidylangchain-${{ github.ref_name }}.tar.gz
-            tidylangchain-${{ github.ref_name }}.tar.gz.sha256
+            ${{ steps.prep.outputs.pkg_file }}
+            ${{ steps.prep.outputs.sha_file }}
           generate_release_notes: true
           fail_on_unmatched_files: true
 
-      - name: Publish as Generic package (optional)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 2. 发布到 GitHub Packages (使用 ORAS 推送到 GHCR)
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+        with:
+          version: 1.2.2
+
+      - name: Login to GHCR
         run: |
-          gh release upload ${{ github.ref_name }} \
-            tidylangchain-${{ github.ref_name }}.tar.gz \
-            tidylangchain-${{ github.ref_name }}.tar.gz.sha256 \
-            --clobber
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Push to GHCR as generic artifact
+        run: |
+          VERSION=${{ github.ref_name }}
+          OWNER=${{ steps.prep.outputs.owner_lc }}
+          PKG_NAME="tidylangchain"
+          FILE=${{ steps.prep.outputs.pkg_file }}
+          
+          oras push \
+            ghcr.io/${OWNER}/${PKG_NAME}:${VERSION} \
+            --artifact-type application/vnd.tidylangchain.tar+gzip \
+            ${FILE}:application/gzip
