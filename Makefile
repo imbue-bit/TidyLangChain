@@ -15,6 +15,7 @@ SRC = \
 	src/tlc_agent.c \
 	src/tlc_vectorstore.c \
 	src/tlc_retriever.c \
+	src/tlc_callbacks.c \
 	src/tlc_embeddings.c
 
 OBJ = $(SRC:.c=.o)
