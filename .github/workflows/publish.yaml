@@ -1,0 +1,66 @@
+name: Publish TidyLangChain to GitHub Packages / Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++ ninja-build
+
+      - name: Build the static library
+        run: |
+          make clean
+          make -j$(nproc)
+
+      - name: Verify library exists
+        run: |
+          ls -lh libtidylangchain.a || { echo "Library not built!"; exit 1; }
+
+      - name: Prepare package directory
+        run: |
+          mkdir -p tidy-package/include
+          cp libtidylangchain.a tidy-package/
+          cp -r include/* tidy-package/include/ || true
+          cp LICENSE README.md tidy-package/ 2>/dev/null || true
+
+      - name: Create versioned archive
+        run: |
+          VERSION=${{ github.ref_name }}          # e.g. v1.0.0
+          tar -czf tidylangchain-${VERSION}.tar.gz -C tidy-package .
+          sha256sum tidylangchain-${VERSION}.tar.gz > tidylangchain-${VERSION}.tar.gz.sha256
+          ls -lh *.tar.gz *.sha256
+
+      - name: Upload archive to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            tidylangchain-${{ github.ref_name }}.tar.gz
+            tidylangchain-${{ github.ref_name }}.tar.gz.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Publish as Generic package (optional)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            tidylangchain-${{ github.ref_name }}.tar.gz \
+            tidylangchain-${{ github.ref_name }}.tar.gz.sha256 \
+            --clobber
