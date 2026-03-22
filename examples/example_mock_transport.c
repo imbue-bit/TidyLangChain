@@ -19,27 +19,8 @@ static tlc_status_t mock_send(void* user_ctx,
 
     resp->status_code = 200;
 
-    /* 如果 prompt 中含有 weather，就模拟 tool call */
-    if (strstr(req->body, "weather") || strstr(req->body, "天气")) {
-        tlc_strcpy_s(resp->body, sizeof(resp->body),
-            "{"
-            "\"id\":\"chatcmpl_mock\","
-            "\"choices\":[{"
-                "\"message\":{"
-                    "\"role\":\"assistant\","
-                    "\"content\":\"\","
-                    "\"tool_calls\":[{"
-                        "\"id\":\"call_1\","
-                        "\"type\":\"function\","
-                        "\"function\":{"
-                            "\"name\":\"get_weather\","
-                            "\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\""
-                        "}"
-                    "}]"
-                "}"
-            "}]"
-            "}");
-    } else if (strstr(req->body, "Based on tool results")) {
+    /* 工具结果的后续调用优先匹配 */
+    if (strstr(req->body, "Based on tool results")) {
         tlc_strcpy_s(resp->body, sizeof(resp->body),
             "{"
             "\"id\":\"chatcmpl_mock\","
@@ -51,16 +32,63 @@ static tlc_status_t mock_send(void* user_ctx,
             "}]"
             "}");
     } else {
-        tlc_strcpy_s(resp->body, sizeof(resp->body),
-            "{"
-            "\"id\":\"chatcmpl_mock\","
-            "\"choices\":[{"
-                "\"message\":{"
-                    "\"role\":\"assistant\","
-                    "\"content\":\"这是一个直接回答，不需要调用工具。\""
-                "}"
-            "}]"
-            "}");
+        /* 只在最后一条用户消息的 content 中检测 weather 关键词 */
+        const char *last_user = NULL;
+        const char *p = req->body;
+        bool is_weather = false;
+        while ((p = strstr(p, "\"role\":\"user\"")) != NULL) {
+            last_user = p;
+            p += 13;
+        }
+        if (last_user) {
+            const char *cnt = strstr(last_user, "\"content\":\"");
+            if (cnt) {
+                cnt += 11; /* skip past "content":" */
+                const char *end = strchr(cnt, '"');
+                if (end) {
+                    size_t len = (size_t)(end - cnt);
+                    char snippet[512];
+                    if (len < sizeof(snippet)) {
+                        memcpy(snippet, cnt, len);
+                        snippet[len] = '\0';
+                        if (strstr(snippet, "weather") || strstr(snippet, "天气")) {
+                            is_weather = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (is_weather) {
+            tlc_strcpy_s(resp->body, sizeof(resp->body),
+                "{"
+                "\"id\":\"chatcmpl_mock\","
+                "\"choices\":[{"
+                    "\"message\":{"
+                        "\"role\":\"assistant\","
+                        "\"content\":\"\","
+                        "\"tool_calls\":[{"
+                            "\"id\":\"call_1\","
+                            "\"type\":\"function\","
+                            "\"function\":{"
+                                "\"name\":\"get_weather\","
+                                "\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\""
+                            "}"
+                        "}]"
+                    "}"
+                "}]"
+                "}");
+        } else {
+            tlc_strcpy_s(resp->body, sizeof(resp->body),
+                "{"
+                "\"id\":\"chatcmpl_mock\","
+                "\"choices\":[{"
+                    "\"message\":{"
+                        "\"role\":\"assistant\","
+                        "\"content\":\"这是一个直接回答，不需要调用工具。\""
+                    "}"
+                "}]"
+                "}");
+        }
     }
 
     return TLC_OK;
@@ -150,14 +178,16 @@ int main(void) {
         tlc_prompt_template_t pt;
         tlc_chain_t chain;
         tlc_output_parser_t parser;
+        tlc_memory_t chain_memory;
         char chain_out[2048];
 
+        tlc_memory_init(&chain_memory);
         tlc_prompt_template_init(&pt, "simple_prompt", "请重写下面内容:\n{input}");
         memset(&parser, 0, sizeof(parser));
         tlc_strcpy_s(parser.name, sizeof(parser.name), "text_parser");
         parser.parse = tlc_text_output_parser;
 
-        tlc_chain_init(&chain, "rewrite_chain", &runtime, &callbacks, &memory, &tools);
+        tlc_chain_init(&chain, "rewrite_chain", &runtime, &callbacks, &chain_memory, &tools);
         tlc_chain_add_prompt(&chain, &pt);
         tlc_chain_add_model(&chain, &model);
         tlc_chain_add_parser(&chain, &parser);

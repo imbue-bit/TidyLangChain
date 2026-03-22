@@ -87,8 +87,15 @@ tlc_status_t tlc_chain_run(tlc_chain_t* chain,
             }
             case TLC_CHAIN_STEP_MODEL: {
                 tlc_model_t* model = (tlc_model_t*)step->ref;
-                if (model->invoke(model, chain->memory, cur_in, NULL, 0, cur_out, TLC_MAX_HTTP_RESPONSE_BODY) != TLC_OK) {
+                char raw[TLC_MAX_HTTP_RESPONSE_BODY];
+                if (model->invoke(model, chain->memory, cur_in, NULL, 0, raw, sizeof(raw)) != TLC_OK) {
                     return TLC_ERR_HTTP;
+                }
+                /* 尝试提取 message content，失败则回退到原始响应 */
+                if (tlc_json_get_openai_message_content(raw, cur_out, TLC_MAX_HTTP_RESPONSE_BODY) != TLC_OK) {
+                    if (tlc_strcpy_s(cur_out, TLC_MAX_HTTP_RESPONSE_BODY, raw) != TLC_OK) {
+                        return TLC_ERR_OVERFLOW;
+                    }
                 }
                 break;
             }
