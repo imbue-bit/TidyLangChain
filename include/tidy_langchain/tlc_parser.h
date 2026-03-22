@@ -2,6 +2,7 @@
 #define TLC_PARSER_H
 
 #include "tlc_status.h"
+#include "tlc_config.h"
 
 #ifdef __cplusplus
 extern "C" {

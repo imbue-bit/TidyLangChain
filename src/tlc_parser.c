@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include "tidy_langchain/tlc_parser.h"
 #include "tidy_langchain/tlc_json.h"
 #include "tidy_langchain/tlc_string.h"
