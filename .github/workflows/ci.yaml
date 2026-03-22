@@ -1,0 +1,76 @@
+name: CI - Build & Test TidyLangChain
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            compiler: g++-13
+            make_extra: ""
+          - os: macos-latest
+            compiler: clang++
+            make_extra: ""
+          - os: windows-latest
+            compiler: cl
+            make_extra: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup environment (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++-13 ninja-build
+
+      - name: Setup environment (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja || true
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Show tool versions
+        run: |
+          ${{ matrix.compiler }} --version || true
+          make --version
+          cmake --version || true
+
+      - name: Build library (using Makefile)
+        run: |
+          make clean
+          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu || echo 4)
+
+      - name: Check output artifacts
+        run: |
+          ls -lh *.a lib*.a 2>/dev/null || true
+          ls -lh libtidylangchain.a 2>/dev/null || echo "Library not found - check Makefile"
+
+      - name: Upload build artifact (static lib)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libtidylangchain-${{ runner.os }}
+          path: |
+            libtidylangchain.a
+            include/**/*
+          retention-days: 7
