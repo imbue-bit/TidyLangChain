@@ -1,4 +1,4 @@
-name: Publish TidyLangChain to GitHub Packages / Release
+name: Publish TidyLangChain
 
 on:
   release:
@@ -12,7 +12,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,70 +21,56 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential g++ ninja-build
+          sudo apt-get install -y build-essential g++
 
       - name: Build the static library
         run: |
           make clean
           make -j$(nproc)
 
-      - name: Verify library exists
-        run: |
-          ls -lh libtidylangchain.a || { echo "Library not built!"; exit 1; }
-
       - name: Prepare package directory
-        run: |
-          mkdir -p tidy-package/include
-          cp libtidylangchain.a tidy-package/
-          cp -r include/* tidy-package/include/ || true
-          cp LICENSE README.md tidy-package/ 2>/dev/null || true
-
-      - name: Create versioned archive
         id: prep
         run: |
           VERSION=${{ github.ref_name }}
+          # 转换为小写，因为 GHCR 不接受大写
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           FILENAME="tidylangchain-${VERSION}.tar.gz"
+          
+          mkdir -p tidy-package/include
+          cp libtidylangchain.a tidy-package/
+          cp -r include/* tidy-package/include/ || true
+          
           tar -czf "$FILENAME" -C tidy-package .
           sha256sum "$FILENAME" > "${FILENAME}.sha256"
           
-          # 将文件名存入 step output 方便后续引用
-          echo "pkg_file=$FILENAME" >> $GITHUB_OUTPUT
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
           echo "sha_file=${FILENAME}.sha256" >> $GITHUB_OUTPUT
-          
-          # 准备小写的仓库所有者名称（GHCR 强制要求小写）
-          echo "owner_lc=${OWNER,,}" >> $GITHUB_OUTPUT
-        env:
-          OWNER: ${{ github.repository_owner }}
+          echo "repo_lc=$REPO_LOWER" >> $GITHUB_OUTPUT
 
-      # 1. 发布到 GitHub Release Assets
-      - name: Upload archive to GitHub Release
+      # 1. 上传到 Release (你已经成功的这部分)
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: |
-            ${{ steps.prep.outputs.pkg_file }}
+            ${{ steps.prep.outputs.filename }}
             ${{ steps.prep.outputs.sha_file }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
 
-      # 2. 发布到 GitHub Packages (使用 ORAS 推送到 GHCR)
+      # 2. 上传到 GitHub Packages (让 Packages 页面出现内容)
       - name: Install ORAS
         uses: oras-project/setup-oras@v1
-        with:
-          version: 1.2.2
 
       - name: Login to GHCR
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Push to GHCR as generic artifact
+      - name: Push to GitHub Packages
         run: |
           VERSION=${{ github.ref_name }}
-          OWNER=${{ steps.prep.outputs.owner_lc }}
-          PKG_NAME="tidylangchain"
-          FILE=${{ steps.prep.outputs.pkg_file }}
+          REPO=${{ steps.prep.outputs.repo_lc }}
+          FILE=${{ steps.prep.outputs.filename }}
           
-          oras push \
-            ghcr.io/${OWNER}/${PKG_NAME}:${VERSION} \
-            --artifact-type application/vnd.tidylangchain.tar+gzip \
+          # 这行命令会将文件推送到 Packages 页面
+          oras push ghcr.io/${REPO}:${VERSION} \
+            --artifact-type application/vnd.tidylangchain.package.v1 \
             ${FILE}:application/gzip
