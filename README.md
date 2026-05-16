@@ -1,5 +1,7 @@
 <div align="center">
 
+![banner](./meta/banner.png)
+
 # ⚛️ TidyLangChain
 
 English | [简体中文](README_CN.md)
